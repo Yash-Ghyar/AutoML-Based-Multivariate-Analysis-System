@@ -1,0 +1,66 @@
+body {
+    background: radial-gradient(circle at top left, #1a1a2e, #16213e, #0f3460);
+    color: #fff;
+    font-family: 'Poppins', sans-serif;
+}
+
+.hero-section {
+    background: linear-gradient(135deg, #007bff, #00c6ff);
+    border-bottom: 3px solid rgba(255,255,255,0.1);
+}
+
+.glass-card {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    backdrop-filter: blur(15px);
+    box-shadow: 0 0 25px rgba(0, 0, 0, 0.3);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 40px rgba(0, 255, 255, 0.3);
+}
+
+textarea {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 10px;
+}
+
+textarea::placeholder {
+    color: #ccc;
+}
+
+.result-card {
+    background: rgba(255,255,255,0.05);
+    border-radius: 20px;
+    backdrop-filter: blur(15px);
+}
+
+.stat-box {
+    border-radius: 12px;
+    padding: 15px;
+    margin: 10px 0;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+}
+
+.text-gradient {
+    background: linear-gradient(90deg, #00c6ff, #0072ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.bg-glow {
+    background: linear-gradient(135deg, #00ffcc, #00bcd4);
+    color: #000;
+    border-radius: 15px;
+}
+
+footer {
+    background: rgba(0,0,0,0.2);
+    font-size: 14px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
