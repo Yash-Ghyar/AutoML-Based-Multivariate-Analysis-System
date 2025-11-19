@@ -47,14 +47,12 @@ def detect_target(df):
             return col
     return df.columns[-1]
 
-
 # -------------------------------------------------
 # Home page
 # -------------------------------------------------
 @app.route("/")
 def index():
     return render_template("index.html")
-
 
 # -------------------------------------------------
 # Train model (auto-select best + task display)
@@ -70,18 +68,51 @@ def train():
     file.save(path)
     df = pd.read_csv(path)
 
+    # Detect target
     target = detect_target(df)
     if target not in df.columns:
         flash("Target column not found automatically. Please rename target column properly.", "danger")
         return redirect(url_for("index"))
 
+    # Split X and y
     X = df.drop(columns=[target])
     y = df[target]
 
-    # Determine task type
+    # ------------------------------------------------------
+    # 1️⃣ MISSING VALUE HANDLING
+    # ------------------------------------------------------
+    # Numeric → median
+    for col in X.select_dtypes(include=[np.number]).columns:
+        X[col] = X[col].fillna(X[col].median())
+
+    # Categorical → mode
+    for col in X.select_dtypes(include=["object", "category"]).columns:
+        if X[col].isnull().sum() > 0:
+            X[col] = X[col].fillna(X[col].mode()[0])
+
+    # ------------------------------------------------------
+    # 2️⃣ OUTLIER DETECTION & REMOVAL (IQR METHOD)
+    # ------------------------------------------------------
+    numeric_cols = X.select_dtypes(include=[np.number]).columns
+
+    for col in numeric_cols:
+        Q1 = X[col].quantile(0.25)
+        Q3 = X[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
+
+        # Keeping only non-outliers
+        mask = (X[col] >= lower) & (X[col] <= upper)
+        X = X[mask]
+        y = y[mask]
+
+    # ------------------------------------------------------
+    # Detect if Classification or Regression
+    # ------------------------------------------------------
     task = "classification" if y.nunique() <= 20 or y.dtype == "object" else "regression"
 
-    # Handle categorical/numeric data automatically
+    # Handle categorical + numeric columns
     cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
 
@@ -90,7 +121,9 @@ def train():
         ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols)
     ])
 
-    # Define models
+    # ------------------------------------------------------
+    # MODEL DEFINITIONS
+    # ------------------------------------------------------
     if task == "classification":
         models = {
             "RandomForest": RandomForestClassifier(n_estimators=200, random_state=42),
@@ -116,11 +149,18 @@ def train():
         }
         metric = r2_score
 
-    # Split dataset
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # ------------------------------------------------------
+    # TRAIN / TEST SPLIT
+    # ------------------------------------------------------
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
     best_model, best_name, best_score = None, None, -999
 
+    # ------------------------------------------------------
+    # AUTO MODEL SELECTION
+    # ------------------------------------------------------
     for name, model in models.items():
         pipe = Pipeline([("preprocessor", preprocessor), ("model", model)])
         try:
@@ -143,7 +183,6 @@ def train():
     metric_name = "Accuracy" if task == "classification" else "R² Score"
     flash(f"✅ Detected Task: {task.title()} | Best Model: {best_name} ({metric_name} = {best_score:.4f})", "success")
     return redirect(url_for("index"))
-
 
 # -------------------------------------------------
 # Multivariate analysis
@@ -263,3 +302,4 @@ def predict():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
