@@ -3,7 +3,7 @@ import uuid
 import joblib
 import pandas as pd
 import numpy as np
-from flask import Flask, request, render_template, redirect, url_for, flash
+from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
@@ -20,94 +20,103 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.metrics import accuracy_score, r2_score
-from sklearn.decomposition import PCA
-from statsmodels.stats.outliers_influence import variance_inflation_factor
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
 
+# Flask setup
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
 
+# Folder setup
 os.makedirs("models", exist_ok=True)
 os.makedirs("uploads", exist_ok=True)
-os.makedirs("static", exist_ok=True)
 
 MODEL_PATH = "models/best_model.pkl"
 
 
-# -------------------------------------------------
-# Helper: Detect target column automatically
-# -------------------------------------------------
+# ---------------------------------------------------------
+# Auto target detection
+# ---------------------------------------------------------
 def detect_target(df):
-    """Automatically detect potential target column"""
+    possible = ["target", "label", "output", "class", "churn"]
     for col in df.columns:
-        if col.lower() in ["target", "churn", "label", "class", "output", "price"]:
+        if col.lower() in possible:
             return col
     return df.columns[-1]
 
 
-# -------------------------------------------------
-# Home page
-# -------------------------------------------------
+# ---------------------------------------------------------
+# HOME PAGE
+# ---------------------------------------------------------
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
-# -------------------------------------------------
-# Train model (auto-select best + task display)
-# -------------------------------------------------
+# ---------------------------------------------------------
+# TRAIN MODEL
+# ---------------------------------------------------------
 @app.route("/train", methods=["POST"])
 def train():
     file = request.files.get("file")
     if not file:
-        flash("Please upload a CSV file.", "danger")
+        flash("Upload a training CSV file", "danger")
         return redirect(url_for("index"))
 
     path = os.path.join("uploads", f"{uuid.uuid4().hex}.csv")
     file.save(path)
     df = pd.read_csv(path)
 
+    # Detect target
     target = detect_target(df)
     if target not in df.columns:
-        flash("Target column not found automatically. Please rename target column properly.", "danger")
+        flash("Target column missing!", "danger")
         return redirect(url_for("index"))
 
     X = df.drop(columns=[target])
     y = df[target]
 
-    # Determine task type
+    # Missing values
+    for col in X.select_dtypes(include=[np.number]).columns:
+        X[col] = X[col].fillna(X[col].median())
+    for col in X.select_dtypes(include=["object"]).columns:
+        X[col] = X[col].fillna(X[col].mode()[0])
+
+    # Outlier removal (IQR)
+    for col in X.select_dtypes(include=[np.number]).columns:
+        Q1, Q3 = X[col].quantile(0.25), X[col].quantile(0.75)
+        IQR = Q3 - Q1
+        mask = (X[col] >= Q1 - 1.5 * IQR) & (X[col] <= Q3 + 1.5 * IQR)
+        X, y = X[mask], y[mask]
+
+    # Task type
     task = "classification" if y.nunique() <= 20 or y.dtype == "object" else "regression"
 
-    # Handle categorical/numeric data automatically
-    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    # Preprocessing
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = X.select_dtypes(include=["object"]).columns.tolist()
 
     preprocessor = ColumnTransformer([
         ("num", StandardScaler(), num_cols),
         ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols)
     ])
 
-    # Define models
+    # Model options
     if task == "classification":
         models = {
-            "RandomForest": RandomForestClassifier(n_estimators=200, random_state=42),
+            "RandomForest": RandomForestClassifier(n_estimators=200),
             "LogisticRegression": LogisticRegression(max_iter=1000),
             "SVM": SVC(),
             "DecisionTree": DecisionTreeClassifier(),
             "KNN": KNeighborsClassifier(),
             "GradientBoosting": GradientBoostingClassifier(),
-            "AdaBoost": AdaBoostClassifier(),
+            "AdaBoost": AdaBoostClassifier()
         }
         metric = accuracy_score
     else:
         models = {
-            "RandomForest": RandomForestRegressor(n_estimators=200, random_state=42),
+            "RandomForest": RandomForestRegressor(n_estimators=200),
             "LinearRegression": LinearRegression(),
-            "Ridge": Ridge(alpha=1.0),
-            "Lasso": Lasso(alpha=0.1),
+            "Ridge": Ridge(),
+            "Lasso": Lasso(),
             "DecisionTree": DecisionTreeRegressor(),
             "KNN": KNeighborsRegressor(),
             "GradientBoosting": GradientBoostingRegressor(),
@@ -116,129 +125,115 @@ def train():
         }
         metric = r2_score
 
-    # Split dataset
+    # Train model suite
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     best_model, best_name, best_score = None, None, -999
 
     for name, model in models.items():
-        pipe = Pipeline([("preprocessor", preprocessor), ("model", model)])
         try:
+            pipe = Pipeline([("prep", preprocessor), ("model", model)])
             pipe.fit(X_train, y_train)
             preds = pipe.predict(X_test)
             score = metric(y_test, preds)
             if score > best_score:
                 best_score, best_model, best_name = score, pipe, name
-        except Exception as e:
-            print(f"Model {name} failed: {e}")
+        except:
+            pass
 
-    # Save best model
+    # Save final model
     joblib.dump({
         "model": best_model,
-        "target": target,
         "task": task,
+        "target": target,
         "columns": X.columns.tolist()
     }, MODEL_PATH)
 
-    metric_name = "Accuracy" if task == "classification" else "R² Score"
-    flash(f"✅ Detected Task: {task.title()} | Best Model: {best_name} ({metric_name} = {best_score:.4f})", "success")
-    return redirect(url_for("index"))
+    return render_template(
+        "result.html",
+        training=True,
+        task=task,
+        best_model=best_name,
+        score=round(best_score, 4),
+        target=target
+    )
 
 
-# -------------------------------------------------
-# Multivariate analysis
-# -------------------------------------------------
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    file = request.files.get("file")
-    if not file:
-        flash("Please upload a dataset for analysis.", "danger")
+# ---------------------------------------------------------
+# TEST MODEL
+# ---------------------------------------------------------
+@app.route("/test", methods=["POST"])
+def test():
+    if not os.path.exists(MODEL_PATH):
+        flash("Train a model first!", "danger")
         return redirect(url_for("index"))
 
-    # Save uploaded file
+    file = request.files.get("file")
+    if not file:
+        flash("Upload a test CSV!", "danger")
+        return redirect(url_for("index"))
+
     path = os.path.join("uploads", f"{uuid.uuid4().hex}.csv")
     file.save(path)
     df = pd.read_csv(path)
 
-    # Drop useless ID-like columns automatically
-    df = df.loc[:, ~df.columns.str.contains("id", case=False)]
+    model_data = joblib.load(MODEL_PATH)
+    pipe, target, task = model_data["model"], model_data["target"], model_data["task"]
 
-    # Select numeric columns
-    numeric = df.select_dtypes(include=[np.number]).fillna(0)
-    if numeric.shape[1] < 2:
-        flash("Need at least 2 numeric columns for analysis.", "danger")
+    if target not in df.columns:
+        flash(f"Test CSV must include target column: {target}", "danger")
         return redirect(url_for("index"))
 
-    # ✅ 1. Scale numeric features before calculating VIF
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(numeric)
+    X_test = df.drop(columns=[target])
+    y_test = df[target]
+    preds = pipe.predict(X_test)
 
-    # ✅ 2. Correlation heatmap
-    corr = pd.DataFrame(scaled, columns=numeric.columns).corr()
-    corr_img = f"corr_{uuid.uuid4().hex}.png"
-    plt.figure(figsize=(7, 5))
-    sns.heatmap(corr, annot=True, cmap="coolwarm")
-    plt.title("Correlation Heatmap (Scaled Data)")
-    plt.tight_layout()
-    plt.savefig(os.path.join("static", corr_img))
-    plt.close()
-
-    # ✅ 3. PCA plot
-    pca = PCA(n_components=2)
-    pca_data = pca.fit_transform(scaled)
-    pca_img = f"pca_{uuid.uuid4().hex}.png"
-    plt.figure(figsize=(6, 4))
-    plt.scatter(pca_data[:, 0], pca_data[:, 1], alpha=0.7)
-    plt.xlabel("PC1")
-    plt.ylabel("PC2")
-    plt.title("PCA (2 Components)")
-    plt.tight_layout()
-    plt.savefig(os.path.join("static", pca_img))
-    plt.close()
-
-    # ✅ 4. VIF Calculation (After Scaling)
-    vif_df = pd.DataFrame()
-    vif_df["Feature"] = numeric.columns
-    vif_df["VIF"] = [variance_inflation_factor(scaled, i) for i in range(scaled.shape[1])]
-
-    # Round off for better readability
-    vif_df["VIF"] = vif_df["VIF"].round(3)
+    if task == "classification":
+        score = accuracy_score(y_test, preds)
+        metric_name = "Accuracy"
+    else:
+        score = r2_score(y_test, preds)
+        metric_name = "R² Score"
 
     return render_template(
-        "index.html",
-        analyzed=True,
-        corr_image=corr_img,
-        pca_image=pca_img,
-        vif_summary=vif_df.to_dict(orient="records")
+        "result.html",
+        testing=True,
+        test_score=round(score, 4),
+        metric_name=metric_name
     )
 
 
-# -------------------------------------------------
-# Predict endpoint
-# -------------------------------------------------
+# ---------------------------------------------------------
+# PREDICT FIXED VERSION (SKIP BLANK LINES)
+# ---------------------------------------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
     if not os.path.exists(MODEL_PATH):
-        flash("Please train a model first.", "danger")
+        flash("Train a model first!", "danger")
         return redirect(url_for("index"))
-
-    model_data = joblib.load(MODEL_PATH)
-    pipe = model_data["model"]
-    columns = model_data["columns"]
-    task = model_data["task"]
 
     text = request.form.get("inputdata")
     if not text:
-        flash("Please enter input data.", "danger")
+        flash("Enter input values", "danger")
         return redirect(url_for("index"))
+
+    model_data = joblib.load(MODEL_PATH)
+    pipe, columns = model_data["model"], model_data["columns"]
 
     try:
         data = {}
-        for line in text.strip().split("\n"):
+
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:     # skip empty blank lines
+                continue
+            if "=" not in line:
+                continue
+
             k, v = line.split("=")
             data[k.strip()] = v.strip()
 
-        # Convert numeric where possible
+        # Convert numbers
         for k in data:
             try:
                 data[k] = float(data[k])
@@ -247,19 +242,41 @@ def predict():
 
         X = pd.DataFrame([data])
 
-        # Handle missing columns
-        missing_cols = [c for c in columns if c not in X.columns]
-        for col in missing_cols:
-            X[col] = 0
+        # Add missing columns = 0
+        for col in columns:
+            X[col] = X.get(col, 0)
 
-        X = X[columns]
-        pred = pipe.predict(X)
-        flash(f"📊 Task: {task.title()} | Prediction: {pred[0]}", "info")
+        pred = pipe.predict(X)[0]
+
+        return render_template(
+            "result.html",
+            predicting=True,
+            prediction=pred
+        )
+
     except Exception as e:
-        flash(f"Invalid input format: {e}", "danger")
+        flash(f"Invalid input: {e}", "danger")
+        return redirect(url_for("index"))
 
-    return redirect(url_for("index"))
+
+# ---------------------------------------------------------
+# JSON API
+# ---------------------------------------------------------
+@app.route("/predict_json", methods=["POST"])
+def predict_json():
+    model_data = joblib.load(MODEL_PATH)
+    pipe, columns = model_data["model"], model_data["columns"]
+
+    data = request.json
+    X = pd.DataFrame([data])
+
+    for col in columns:
+        X[col] = X.get(col, 0)
+
+    pred = pipe.predict(X)[0]
+    return jsonify({"prediction": str(pred)})
 
 
+# ---------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
