@@ -42,18 +42,30 @@ def detect_target(df):
             return col
     return df.columns[-1]
 
+<<<<<<< HEAD
 
 # ---------------------------------------------------------
 # HOME PAGE
 # ---------------------------------------------------------
+=======
+# -------------------------------------------------
+# Home page
+# -------------------------------------------------
+>>>>>>> 514d4e28b53b133ef376ac4f06063e24ed89f009
 @app.route("/")
 def index():
     return render_template("index.html")
 
+<<<<<<< HEAD
 
 # ---------------------------------------------------------
 # TRAIN MODEL
 # ---------------------------------------------------------
+=======
+# -------------------------------------------------
+# Train model (auto-select best + task display)
+# -------------------------------------------------
+>>>>>>> 514d4e28b53b133ef376ac4f06063e24ed89f009
 @app.route("/train", methods=["POST"])
 def train():
     file = request.files.get("file")
@@ -71,9 +83,11 @@ def train():
         flash("Target column missing!", "danger")
         return redirect(url_for("index"))
 
+    # Split X and y
     X = df.drop(columns=[target])
     y = df[target]
 
+<<<<<<< HEAD
     # Missing values
     for col in X.select_dtypes(include=[np.number]).columns:
         X[col] = X[col].fillna(X[col].median())
@@ -91,6 +105,44 @@ def train():
     task = "classification" if y.nunique() <= 20 or y.dtype == "object" else "regression"
 
     # Preprocessing
+=======
+    # ------------------------------------------------------
+    # 1️⃣ MISSING VALUE HANDLING
+    # ------------------------------------------------------
+    # Numeric → median
+    for col in X.select_dtypes(include=[np.number]).columns:
+        X[col] = X[col].fillna(X[col].median())
+
+    # Categorical → mode
+    for col in X.select_dtypes(include=["object", "category"]).columns:
+        if X[col].isnull().sum() > 0:
+            X[col] = X[col].fillna(X[col].mode()[0])
+
+    # ------------------------------------------------------
+    # 2️⃣ OUTLIER DETECTION & REMOVAL (IQR METHOD)
+    # ------------------------------------------------------
+    numeric_cols = X.select_dtypes(include=[np.number]).columns
+
+    for col in numeric_cols:
+        Q1 = X[col].quantile(0.25)
+        Q3 = X[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
+
+        # Keeping only non-outliers
+        mask = (X[col] >= lower) & (X[col] <= upper)
+        X = X[mask]
+        y = y[mask]
+
+    # ------------------------------------------------------
+    # Detect if Classification or Regression
+    # ------------------------------------------------------
+    task = "classification" if y.nunique() <= 20 or y.dtype == "object" else "regression"
+
+    # Handle categorical + numeric columns
+    cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+>>>>>>> 514d4e28b53b133ef376ac4f06063e24ed89f009
     num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = X.select_dtypes(include=["object"]).columns.tolist()
 
@@ -99,7 +151,13 @@ def train():
         ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols)
     ])
 
+<<<<<<< HEAD
     # Model options
+=======
+    # ------------------------------------------------------
+    # MODEL DEFINITIONS
+    # ------------------------------------------------------
+>>>>>>> 514d4e28b53b133ef376ac4f06063e24ed89f009
     if task == "classification":
         models = {
             "RandomForest": RandomForestClassifier(n_estimators=200),
@@ -125,11 +183,23 @@ def train():
         }
         metric = r2_score
 
+<<<<<<< HEAD
     # Train model suite
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+=======
+    # ------------------------------------------------------
+    # TRAIN / TEST SPLIT
+    # ------------------------------------------------------
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+>>>>>>> 514d4e28b53b133ef376ac4f06063e24ed89f009
 
     best_model, best_name, best_score = None, None, -999
 
+    # ------------------------------------------------------
+    # AUTO MODEL SELECTION
+    # ------------------------------------------------------
     for name, model in models.items():
         try:
             pipe = Pipeline([("prep", preprocessor), ("model", model)])
@@ -158,6 +228,7 @@ def train():
         target=target
     )
 
+<<<<<<< HEAD
 
 # ---------------------------------------------------------
 # TEST MODEL
@@ -171,6 +242,16 @@ def test():
     file = request.files.get("file")
     if not file:
         flash("Upload a test CSV!", "danger")
+=======
+# -------------------------------------------------
+# Multivariate analysis
+# -------------------------------------------------
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    file = request.files.get("file")
+    if not file:
+        flash("Please upload a dataset for analysis.", "danger")
+>>>>>>> 514d4e28b53b133ef376ac4f06063e24ed89f009
         return redirect(url_for("index"))
 
     path = os.path.join("uploads", f"{uuid.uuid4().hex}.csv")
@@ -280,3 +361,4 @@ def predict_json():
 # ---------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
+
