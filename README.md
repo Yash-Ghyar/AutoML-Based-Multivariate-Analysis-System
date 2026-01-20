@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 🤖 AutoML Machine Learning Dashboard
 Train • Test • Predict — Automatically (Flask + Scikit-Learn + Render)
 
